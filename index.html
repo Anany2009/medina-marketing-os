@@ -333,6 +333,7 @@ body{font-family:'Cairo',sans-serif;background:var(--navy);color:var(--ink);min-
     <div class="sb-section">عملي اليومي</div>
     <div class="nav-item active" onclick="enav('hub',this)"><span class="nav-icon">🌅</span>لوحتي اليوم</div>
     <div class="nav-item" onclick="enav('out',this)"><span class="nav-icon">📤</span>التواصل<span class="nav-badge" id="nb-rem">30</span></div>
+    <div class="nav-item" onclick="enav('done',this)"><span class="nav-icon">✅</span>تم التواصل<span class="nav-badge" id="nb-done" style="background:#27ae60;">0</span></div>
     <div class="sb-section">التقدم</div>
     <div class="nav-item" onclick="enav('prog',this)"><span class="nav-icon">📊</span>تقدمي</div>
     <div class="nav-item" onclick="enav('echat',this);setChatBadge(false);" id="echat-nav"><span class="nav-icon">💬</span>دردشة<span id="chat-badge" style="display:none;background:#E74C3C;color:#fff;font-size:9px;font-weight:800;width:16px;height:16px;border-radius:50%;align-items:center;justify-content:center;margin-right:4px;">!</span></div>
@@ -447,6 +448,25 @@ body{font-family:'Cairo',sans-serif;background:var(--navy);color:var(--ink);min-
           <div class="ftabs" id="out-ftabs"></div>
         </div>
         <div id="out-cards"></div>
+      </div>
+
+      <!-- CONTACTED (تم التواصل) -->
+      <div class="page" id="ep-done">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">✅ تم التواصل</div>
+              <div class="card-sub" id="done-sub">كل الجهات التي تم التواصل معها</div>
+            </div>
+            <div class="kpi" style="padding:10px 16px;text-align:center;min-width:90px;">
+              <div class="kpi-label">الإجمالي</div>
+              <div class="kpi-val" style="font-size:22px;" id="done-count">0</div>
+              <div style="font-size:10px;color:var(--ink3);">جهة</div>
+            </div>
+          </div>
+          <input id="done-search" oninput="renderDone()" placeholder="🔍 ابحثي بالاسم أو الدولة..." style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-top:6px;">
+        </div>
+        <div id="done-cards"></div>
       </div>
 
       <!-- PROGRESS -->
@@ -2762,7 +2782,7 @@ function initEmp(){
   // Start chat polling even when not on chat page (for badge/sound)
   if(!_chatPollTimer){ _lastMsgCount=JSON.parse(localStorage.getItem('mos_chat_msgs')||'[]').length; _chatMsgs=JSON.parse(localStorage.getItem('mos_chat_msgs')||'[]'); _chatPollTimer=setInterval(()=>{const m=JSON.parse(localStorage.getItem('mos_chat_msgs')||'[]');if(m.length!==_chatMsgs.length)_onNewMessages(m);},1500); }
   if(new Date().getDay()===4)document.getElementById('wk-remind').style.display='block';
-  loadRepDraft();chkFBnotif();
+  loadRepDraft();chkFBnotif();updateDoneBadge();
 }
 function enav(p,el,fromPop){
   document.querySelectorAll('#emp-app .page').forEach(x=>x.classList.remove('on'));
@@ -2770,12 +2790,13 @@ function enav(p,el,fromPop){
   document.getElementById('ep-'+p).classList.add('on');
   if(el)el.classList.add('active');
   else{const m=[...document.querySelectorAll('#emp-app .nav-item')].find(n=>n.getAttribute('onclick')?.includes("'"+p+"'"));if(m)m.classList.add('active');}
-  const T={hub:'لوحتي اليوم',out:'التواصل اليومي',prog:'تقدمي',drep:'تقرير اليوم',rep:'تقريري الأسبوعي',echat:'الدردشة'};
+  const T={hub:'لوحتي اليوم',out:'التواصل اليومي',done:'تم التواصل',prog:'تقدمي',drep:'تقرير اليوم',rep:'تقريري الأسبوعي',echat:'الدردشة'};
   document.getElementById('etitle').textContent=T[p]||p;
   if(!fromPop) routerPush('emp',p);
   if(p==='prog')updProgPage();
   if(p==='drep')initDailyRep();
   if(p==='out')renderOut();
+  if(p==='done')renderDone();
   if(p==='echat')initChat();
 }
 function setGreet(){
@@ -2972,16 +2993,17 @@ function getTQ(){
     .map(idx=>({contact:CONTACTS[idx],globalIdx:idx,isCarryover:true}));
 
   // ── Step 2: Fill remaining slots with new contacts ──
+  // Skip contacts already in carryover AND contacts already contacted (stable c[9] flag),
+  // scanning forward until we gather enough fresh, never-contacted contacts.
   const lastIdx=G('mos_last_contact_idx',-1);
-  let nextIdx=(lastIdx+1)%total;
   const needed=Math.max(0,g-carryoverContacts.length);
   const newContacts=[];
-  for(let i=0;i<needed;i++){
-    const ci=(nextIdx+i)%total;
-    // skip if already in carryover
-    if(!carryover.includes(ci)){
+  let ci=(lastIdx+1)%total, scanned=0;
+  while(newContacts.length<needed && scanned<total){
+    if(!carryover.includes(ci) && !(CONTACTS[ci]&&CONTACTS[ci][9])){
       newContacts.push({contact:CONTACTS[ci],globalIdx:ci,isCarryover:false});
     }
+    ci=(ci+1)%total; scanned++;
   }
 
   // ── Step 3: Build todayQ ──
@@ -3105,6 +3127,68 @@ function renderOut(){
 
 function filtOut(f,el){outFilt=f;renderOut();}
 
+// ── CONTACTED LIST (تم التواصل) — accumulates every contact that was reached ──
+function collectContacted(){
+  const pre='mos_od_';
+  const map={}; // globalIdx -> {s,date}
+  for(let k in localStorage){
+    if(k.indexOf(pre)===0){
+      const date=k.slice(pre.length);
+      let od={};try{od=JSON.parse(localStorage.getItem(k)||'{}');}catch(e){}
+      const meta=G('mos_todayQMeta_'+date,[]);
+      Object.keys(od).forEach(slot=>{
+        const v=od[slot];
+        if(v&&v.s&&v.s!=='pend'){
+          const gi=(meta[slot]&&typeof meta[slot].globalIdx==='number')?meta[slot].globalIdx:parseInt(slot,10);
+          if(gi>=0&&gi<CONTACTS.length){ map[gi]={s:v.s,date:date}; }
+        }
+      });
+    }
+  }
+  // stable imported flag c[9]
+  CONTACTS.forEach((c,i)=>{ if(c[9]&&!map[i]) map[i]={s:'done',date:c[9]}; });
+  return Object.keys(map).map(gi=>({gi:+gi,c:CONTACTS[+gi],s:map[gi].s,date:map[gi].date}));
+}
+function updateDoneBadge(){
+  const n=collectContacted().length;
+  const nb=document.getElementById('nb-done');if(nb)nb.textContent=n;
+  const dc=document.getElementById('done-count');if(dc)dc.textContent=n;
+}
+function renderDone(){
+  const box=document.getElementById('done-cards');if(!box)return;
+  const q=(document.getElementById('done-search')?.value||'').toLowerCase().trim();
+  let list=collectContacted();
+  list.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const total=list.length;
+  const dc=document.getElementById('done-count');if(dc)dc.textContent=total;
+  const nb=document.getElementById('nb-done');if(nb)nb.textContent=total;
+  const sub=document.getElementById('done-sub');if(sub)sub.textContent=total+' جهة تم التواصل معها';
+  if(q)list=list.filter(x=>(x.c[0]||'').toLowerCase().includes(q)||(x.c[1]||'').toLowerCase().includes(q));
+  const FLAGS={USA:'🇺🇸',UK:'🇬🇧',Canada:'🇨🇦',Australia:'🇦🇺',France:'🇫🇷',Germany:'🇩🇪',Netherlands:'🇳🇱',Ireland:'🇮🇪',Belgium:'🇧🇪',Spain:'🇪🇸',Italy:'🇮🇹',Sweden:'🇸🇪',Norway:'🇳🇴',Denmark:'🇩🇰',Finland:'🇫🇮',Austria:'🇦🇹',Portugal:'🇵🇹',Switzerland:'🇨🇭','South Africa':'🇿🇦',Malaysia:'🇲🇾',Indonesia:'🇮🇩','New Zealand':'🇳🇿',Pakistan:'🇵🇰'};
+  const slbl={done:'✅ تم',pos:'💚 إيجابي',neg:'❌ لا رد'};
+  if(!list.length){box.innerHTML='<div class="card" style="text-align:center;color:var(--ink3);padding:30px;">لا توجد نتائج</div>';return;}
+  box.innerHTML=list.slice(0,300).map(({c,s,date})=>{
+    const n=escapeHTML(c[0]),co=escapeHTML(c[1]),ci=escapeHTML(c[2]||''),ph=c[3]||'',em=c[4]||'',w=c[5]||'',t=escapeHTML(c[6]||'');
+    const fl=FLAGS[c[1]]||'🌍';const num=ph.replace(/[^\d]/g,'');
+    return `<div class="contact-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div><div class="cc-name">${n}</div><div class="cc-type">${t}</div></div>
+        <div style="text-align:left;">
+          <div class="cc-country">${fl} ${co}</div>
+          <div style="margin-top:4px;"><span class="badge ${s==='pos'?'b-g':s==='neg'?'b-l':'b-m'}">${slbl[s]||'✅ تم'}</span></div>
+          <div style="font-size:9px;color:var(--ink3);margin-top:2px;">${date}</div>
+        </div>
+      </div>
+      <div class="cc-meta">${ci?`📍 ${ci}<br>`:''}${ph?`📞 ${ph}<br>`:''}${em?`✉️ ${em}<br>`:''}${w?`🌐 ${w}`:''}</div>
+      <div class="cc-actions">
+        ${num?`<a class="cc-btn cc-wa" href="https://wa.me/${num}" target="_blank">💬 واتساب</a>`:''}
+        ${em?`<a class="cc-btn cc-em" href="mailto:${em}" target="_blank">✉️ إيميل</a>`:''}
+        ${w?`<a class="cc-btn cc-web" href="${w.startsWith('http')?w:'https://'+w}" target="_blank">🌐 الموقع</a>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function openWA(i){
   const c=todayQ[i];if(!c)return;
   const[n,co,,ph]=c;
@@ -3154,6 +3238,8 @@ function setST(i,st,rr=true){
   }
 
   if(rr)renderOut();updProg();chkCeleb();
+  updateDoneBadge();
+  if(document.getElementById('ep-done')&&document.getElementById('ep-done').classList.contains('on'))renderDone();
   toast(st==='pos'?'💚 ردّ إيجابي!':st==='done'?'✅ تم التواصل':'❌ لا رد');
 }
 
