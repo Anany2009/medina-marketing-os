@@ -3760,6 +3760,9 @@ function initFB(config){
       if(document.getElementById('ap-das')?.classList.contains('on')){
         renderAdmDash();
       }
+      if(document.getElementById('ap-contacts')?.classList.contains('on')){
+        renderAC();
+      }
     });
 
     // ── Sync all outreach data dates ──
@@ -3772,6 +3775,9 @@ function initFB(config){
       });
       if(document.getElementById('ap-das')?.classList.contains('on')){
         renderAdmDash();
+      }
+      if(document.getElementById('ap-contacts')?.classList.contains('on')){
+        renderAC();
       }
     });
 
