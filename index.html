@@ -3115,6 +3115,7 @@ function renderOut(){
         ${ph?`<button class="cc-btn cc-wa" onclick="openWA(${ri})">💬 واتساب</button>`:''}
         ${em?`<button class="cc-btn cc-em" onclick="openEM(${ri})">✉️ إيميل</button>`:''}
         ${w?`<button class="cc-btn cc-web" onclick="openW('${w}')">🌐 الموقع</button>`:''}
+        <button class="cc-btn" style="background:#EAF2FF;color:#1A5FB4;" onclick="openSearch(${ri})">🔎 بحث</button>
       </div>
       <div class="st-btns">
         <button class="st-btn st-g${st==='pos'?' on':''}" onclick="setST(${ri},'pos')">💚 ردّ إيجابي</button>
@@ -3184,6 +3185,7 @@ function renderDone(){
         ${num?`<a class="cc-btn cc-wa" href="https://wa.me/${num}" target="_blank">💬 واتساب</a>`:''}
         ${em?`<a class="cc-btn cc-em" href="mailto:${em}" target="_blank">✉️ إيميل</a>`:''}
         ${w?`<a class="cc-btn cc-web" href="${w.startsWith('http')?w:'https://'+w}" target="_blank">🌐 الموقع</a>`:''}
+        <a class="cc-btn" style="background:#EAF2FF;color:#1A5FB4;" href="https://www.google.com/search?q=${encodeURIComponent([c[0],c[2],c[1]].filter(Boolean).join(' '))}" target="_blank">🔎 بحث</a>
       </div>
     </div>`;
   }).join('');
@@ -3207,6 +3209,9 @@ function openEM(i){
   setST(i,'done',false);
 }
 function openW(w){window.open((w.startsWith('http')?w:'https://'+w),'_blank');}
+// Google search for a contact (name + city + country) — helps find website/email/verify when missing
+function searchQuery(c){return encodeURIComponent([c[0],c[2],c[1]].filter(Boolean).join(' '));}
+function openSearch(i){const c=todayQ[i];if(!c)return;window.open('https://www.google.com/search?q='+searchQuery(c),'_blank');}
 
 function setST(i,st,rr=true){
   const d=getOD();
